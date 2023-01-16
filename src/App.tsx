@@ -23,15 +23,23 @@ import {
 import idl from "./idl.json";
 import { Program } from "@project-serum/anchor";
 import { PROGRAM_ID_CLI } from "./generated/programId";
+import {
+  VrfClientStateFields,
+  VrfClientState,
+} from "./generated/accounts/vrfClientState";
 
 const connection = new Connection(clusterApiUrl("devnet"));
 var Buffer = require("buffer/").Buffer;
 const DEFAULT_COMMITMENT = "confirmed";
-const ops = "processed";
+const ops = "confirmed";
 
 function App() {
   const [wallet, setWallet] = useState<string>("");
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [gameSecretId, setGameSecretId] = useState("");
+  const [vrfSecretKey, setVrfSecretKey] = useState<Keypair>();
+  const [loading, setLoading] = useState<boolean>(false);
+  const [randomValue, setRandomValue] = useState<string>("");
 
   const getPhantomProvider = () => {
     if ("phantom" in window) {
@@ -88,11 +96,9 @@ function App() {
   }, []);
 
   const getProvider = () => {
-    const provider = new anchor.AnchorProvider(
-      connection,
-      window.solana,
-      { commitment: ops }
-    );
+    const provider = new anchor.AnchorProvider(connection, window.solana, {
+      commitment: ops,
+    });
     return provider;
   };
 
@@ -148,16 +154,21 @@ function App() {
 
   const createAccount = async (pubkey: string) => {
     console.log("in here");
+    console.log(pubkey);
     const payerPubkey = new PublicKey(pubkey);
     const provider = getProvider();
     const switchboardProgram = await loadSwitchboardProgram(
       "devnet",
-      provider.connection,
+      provider.connection
     );
     // const house = await House.load(program);
     // const program = await getFlipProgram(clusterApiUrl("devnet"));
     const programID = new PublicKey(idl.metadata.address);
-    const program = new anchor.Program(JSON.parse(JSON.stringify(idl)), programID, provider);
+    const program = new anchor.Program(
+      JSON.parse(JSON.stringify(idl)),
+      programID,
+      provider
+    );
 
     // const program = await anchor.
 
@@ -165,6 +176,7 @@ function App() {
     const switchboardMint = await switchboardQueue.loadMint();
 
     const vrfSecret = anchor.web3.Keypair.generate();
+    setVrfSecretKey(vrfSecret);
 
     const [programStateAccount, stateBump] = ProgramStateAccount.fromSeed(
       switchboardProgram as any
@@ -196,6 +208,29 @@ function App() {
       true
     );
 
+    const USDCMint = new PublicKey(
+      "DmLQYBFTMLt2DTCPA9NnC81zZwZCrYwWBNmkbYnUgo9Y"
+    );
+    const payerTokenAccount = await spl.getAssociatedTokenAddress(
+      USDCMint,
+      payerPubkey
+    );
+    const gameId = (Math.random() * 1000).toString();
+    setGameSecretId(gameId);
+
+    const [gamePDA, gameBump] = await anchor.web3.PublicKey.findProgramAddress(
+      [Buffer.from("GAME"), Buffer.from(gameId), payerPubkey.toBuffer()],
+      program.programId
+    );
+    const [escrowPDA, escrowBump] =
+      await anchor.web3.PublicKey.findProgramAddress(
+        [Buffer.from("ESCROW"), Buffer.from(gameId), payerPubkey.toBuffer()],
+        program.programId
+      );
+
+    // const vrfProgram = new VrfAccount({program: switchboardProgram, publicKey: vrfSecret.publicKey, keypair: vrfSecret})
+    // const vrf = await vrfProgram.loadData();
+    console.log(gamePDA.toBase58());
     const txnIxns: TransactionInstruction[] = [
       // create VRF account
       spl.createAssociatedTokenAccountInstruction(
@@ -228,7 +263,7 @@ function App() {
         .accounts({
           vrf: vrfSecret.publicKey,
           escrow: vrfEscrow,
-          authority: payerPubkey,
+          authority: vrfClientKey,
           oracleQueue: switchboardQueue.publicKey,
           programState: programStateAccount.publicKey,
           tokenProgram: spl.TOKEN_PROGRAM_ID,
@@ -246,37 +281,209 @@ function App() {
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .instruction(),
-      // create user account
-      // await program.methods
-      //   .userInit({
-      //     switchboardStateBump: stateBump,
-      //     vrfPermissionBump: permissionBump,
-      //   })
-      //   .accounts({
-      //     user: userKey,
-      //     house: house.publicKey,
-      //     mint: flipMint.address,
-      //     authority: payerPubkey,
-      //     escrow: escrowKeypair.publicKey,
-      //     rewardAddress: rewardAddress,
-      //     vrf: vrfSecret.publicKey,
-      //     payer: payerPubkey,
-      //     systemProgram: anchor.web3.SystemProgram.programId,
-      //     tokenProgram: spl.TOKEN_PROGRAM_ID,
-      //     associatedTokenProgram: spl.ASSOCIATED_TOKEN_PROGRAM_ID,
-      //     rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-      //   })
-      //   .instruction(),
+      await program.methods
+        .initClient({
+          maxResult: new anchor.BN(1337),
+          gameId: gameId,
+          choice: new anchor.BN(0),
+          betAmount: new anchor.BN(1),
+        })
+        .accounts({
+          game: gamePDA,
+          escrowTokenAccount: escrowPDA,
+          tokenMint: USDCMint,
+          userTokenAccount: payerTokenAccount,
+          state: vrfClientKey,
+          vrf: vrfSecret.publicKey,
+          payer: payerPubkey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: spl.TOKEN_PROGRAM_ID,
+        })
+        .instruction(),
     ];
-    const tx = new anchor.web3.Transaction().add(...txnIxns)
+    const tx = new anchor.web3.Transaction().add(...txnIxns);
     tx.feePayer = payerPubkey;
     tx.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+    tx.sign(vrfSecret);
 
-    const {signature} = await phantomProvider.signAndSendTransaction(tx);
+    const { signature } = await phantomProvider.signAndSendTransaction(tx);
     console.log(signature);
     const status = await connection.getSignatureStatus(signature);
+    console.log("finding gameState");
+    console.log(gamePDA.toBase58());
+    // const gameState = await program.account.gameState.fetch(gamePDA);
+    // console.log(gameState);
     console.log(status);
     console.log("over");
+    // const state = await VrfClientState.fetch(
+    //   connection,
+    //   vrfClientKey
+    // );
+    // let data;
+    // if(state!=null) {
+    //   data = state;
+    // }
+    // const vrfAccount = new VrfAccount({
+    //   program: switchboardProgram,
+    //   publicKey: state.vrf,
+    // });
+  };
+
+  const findPDA = async () => {
+    const provider = getProvider();
+    const programID = new PublicKey(idl.metadata.address);
+    const program = new anchor.Program(
+      JSON.parse(JSON.stringify(idl)),
+      programID,
+      provider
+    );
+    const PDA = new PublicKey("98VHjjMorYDeVXxUdUDXLyb6dDcZKjpxTPFAxW8xpfXb");
+    const [vrfClientKey, vrfClientBump] =
+      anchor.utils.publicKey.findProgramAddressSync(
+        [Buffer.from("CLIENTSEED"), vrfSecretKey!.publicKey.toBytes()],
+        program.programId
+      );
+    console.log(vrfClientKey);
+    const gameState: any = await program.account.vrfClientState.fetch(vrfClientKey);
+    console.log(gameState.result.toString());
+  };
+
+  const requestRandomness = async () => {
+    setLoading(true);
+    const payerPubkey = new PublicKey(wallet);
+    const provider = getProvider();
+    const switchboardProgram = await loadSwitchboardProgram(
+      "devnet",
+      provider.connection
+    );
+    // const house = await House.load(program);
+    // const program = await getFlipProgram(clusterApiUrl("devnet"));
+    const programID = new PublicKey(idl.metadata.address);
+    const program = new anchor.Program(
+      JSON.parse(JSON.stringify(idl)),
+      programID,
+      provider
+    );
+    const gameId = gameSecretId;
+    const vrfSecret = vrfSecretKey;
+    const [gamePDA, gameBump] = await anchor.web3.PublicKey.findProgramAddress(
+      [Buffer.from("GAME"), Buffer.from(gameId), payerPubkey.toBuffer()],
+      program.programId
+    );
+    const [escrowPDA, escrowBump] =
+      await anchor.web3.PublicKey.findProgramAddress(
+        [Buffer.from("ESCROW"), Buffer.from(gameId), payerPubkey.toBuffer()],
+        program.programId
+      );
+
+    const switchboardQueue = getQueueAccount(switchboardProgram);
+    const switchboardMint = await switchboardQueue.loadMint();
+
+    const [programStateAccount, stateBump] = ProgramStateAccount.fromSeed(
+      switchboardProgram as any
+    );
+
+    const queue = await switchboardQueue.loadData();
+    const [vrfClientKey, vrfClientBump] =
+      anchor.utils.publicKey.findProgramAddressSync(
+        [Buffer.from("CLIENTSEED"), vrfSecret?.publicKey.toBytes()],
+        program.programId
+      );
+
+    const [permissionAccount, permissionBump] = PermissionAccount.fromSeed(
+      switchboardProgram as any,
+      queue.authority,
+      switchboardQueue.publicKey,
+      vrfSecret!.publicKey
+    );
+
+    const vrfEscrow = await spl.getAssociatedTokenAddress(
+      switchboardMint.address,
+      vrfSecret!.publicKey,
+      true
+    );
+
+    const USDCMint = new PublicKey(
+      "DmLQYBFTMLt2DTCPA9NnC81zZwZCrYwWBNmkbYnUgo9Y"
+    );
+    const payerTokenAccount = await spl.getAssociatedTokenAddress(
+      USDCMint,
+      payerPubkey
+    );
+
+    setGameSecretId(gameId);
+
+    const wrappedMint = new PublicKey(
+      "So11111111111111111111111111111111111111112"
+    );
+    const payerWrappedTokenAddress = await spl.getAssociatedTokenAddress(
+      wrappedMint,
+      payerPubkey
+    );
+
+    try {
+      const request_signature = await program.methods
+        .requestRandomness({
+          switchboardStateBump: stateBump,
+          permissionBump,
+          gameId,
+        })
+        .accounts({
+          state: vrfClientKey,
+          vrf: vrfSecret!.publicKey,
+          oracleQueue: switchboardQueue.publicKey,
+          queueAuthority: queue.authority,
+          dataBuffer: queue.dataBuffer,
+          permission: permissionAccount.publicKey,
+          escrow: vrfEscrow,
+          programState: programStateAccount.publicKey,
+          switchboardProgram: switchboardProgram.programId,
+          payerWallet: payerWrappedTokenAddress,
+          payerAuthority: payerPubkey,
+          escrowTokenAccount: escrowPDA,
+          game: gamePDA,
+          owner: payerPubkey,
+          userTokenAccount: payerTokenAccount,
+          joinee: payerPubkey,
+          recentBlockhashes: anchor.web3.SYSVAR_RECENT_BLOCKHASHES_PUBKEY,
+          tokenProgram: anchor.utils.token.TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      console.log(request_signature);
+
+      const status = await connection.getSignatureStatus(request_signature);
+      if (status) {
+        console.log(status);
+        let accountWs: number;
+        const awaitUpdatePromise = new Promise(
+          (resolve: (value: any) => void) => {
+            accountWs = program.provider.connection.onAccountChange(
+              vrfClientKey,
+              async (accountInfo) => {
+                console.log(accountInfo);
+                const vrfClientState: any = await program.account.vrfClientState.fetch(
+                  vrfClientKey
+                );
+                console.log(`VrfClient Result: ${vrfClientState.result.toString(10)}`); 
+                if(vrfClientState.result.toString(10) === "0"){
+                  return;
+                }
+                setLoading(false);
+                setRandomValue(vrfClientState.result.toString(10));
+                resolve(vrfClientState);
+              }
+            );
+          }
+        );
+      }
+    } catch (error) {
+      console.log(error);
+      setLoading(false);
+
+    }
+    console.log(gamePDA.toBase58());
+    console.log(vrfClientKey.toBase58());
   };
 
   return (
@@ -296,7 +503,12 @@ function App() {
           ) : (
             <p>Wallet is not connected</p>
           )}
-          <Button primary onClick={() => createAccount(wallet)}>Initialize User</Button>
+          <Button primary onClick={() => createAccount(wallet)}>
+            Initialize User
+          </Button>
+          <Button onClick={findPDA}>FindPDA</Button>
+          {loading ? <Button loading >requesting Randomness</Button> : <Button onClick={requestRandomness}>Request Randomness</Button>}
+          {randomValue !== "" && <p>The VRF value is: {randomValue}</p>}
         </Segment>
       </div>
     </div>
