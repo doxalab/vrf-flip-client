@@ -1,0 +1,77 @@
+{
+  "name": "first-dapp",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@project-serum/anchor": "^0.26.0",
+    "@semantic-ui-react/css-patch": "^1.1.2",
+    "@solana/web3.js": "^1.73.0",
+    "@switchboard-xyz/sbv2-utils": "^0.1.54",
+    "@switchboard-xyz/switchboard-v2": "^0.0.173",
+    "@testing-library/jest-dom": "^5.16.4",
+    "@testing-library/react": "^13.2.0",
+    "@testing-library/user-event": "^13.5.0",
+    "@types/jest": "^27.5.0",
+    "@types/node": "^16.11.33",
+    "@types/react": "^18.0.9",
+    "@types/react-dom": "^18.0.3",
+    "@types/semantic-ui": "^2.2.7",
+    "axios": "^1.2.2",
+    "base58-js": "^1.0.4",
+    "browserify-zlib": "^0.2.0",
+    "concurrently": "^7.6.0",
+    "path-browserify": "^1.0.1",
+    "react": "^18.1.0",
+    "react-bootstrap": "^2.6.0",
+    "react-component-updater": "^1.0.7",
+    "react-countdown": "^2.3.5",
+    "react-countdown-simple": "^1.0.12",
+    "react-dom": "^18.1.0",
+    "react-scripts": "^5.0.1",
+    "reactjs-popup": "^2.0.5",
+    "semantic-ui-css": "^2.4.1",
+    "semantic-ui-react": "^2.0.3",
+    "typescript": "^4.6.4",
+    "web-vitals": "^2.1.4",
+    "webpack": "^5.75.0"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run watch:style\" \"react-app-rewired start\"",
+    "postinstall": "semantic-ui-css-patch",
+    "start": "react-app-rewired start",
+    "build": "react-app-rewired build",
+    "test": "react-app-rewired test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "assert": "^2.0.0",
+    "buffer": "^6.0.3",
+    "crypto-browserify": "^3.12.0",
+    "https-browserify": "^1.0.0",
+    "os-browserify": "^0.3.0",
+    "process": "^0.11.10",
+    "react-app-rewired": "^2.2.1",
+    "stream-browserify": "^3.0.0",
+    "stream-http": "^3.2.0",
+    "tailwindcss": "^3.2.4",
+    "url": "^0.11.0"
+  }
+}
