@@ -21,12 +21,6 @@ import {
   VrfAccount,
 } from "@switchboard-xyz/switchboard-v2";
 import idl from "./idl.json";
-import { Program } from "@project-serum/anchor";
-import { PROGRAM_ID_CLI } from "./generated/programId";
-import {
-  VrfClientStateFields,
-  VrfClientState,
-} from "./generated/accounts/vrfClientState";
 
 const connection = new Connection(clusterApiUrl("devnet"));
 var Buffer = require("buffer/").Buffer;
@@ -40,6 +34,7 @@ function App() {
   const [vrfSecretKey, setVrfSecretKey] = useState<Keypair>();
   const [loading, setLoading] = useState<boolean>(false);
   const [randomValue, setRandomValue] = useState<string>("");
+  const [userInitialized, setUserInitialized] = useState<boolean>(false);
 
   const getPhantomProvider = () => {
     if ("phantom" in window) {
@@ -75,13 +70,13 @@ function App() {
         console.log(response.publicKey.toString());
         setWallet(response.publicKey.toString());
         setIsConnected(true);
-        // await createAccount(response.publicKey.toString());
+        findUserInitialized(response.publicKey.toString());
       } catch (error) {
         const response = await solana.connect();
         console.log(response.publicKey.toString());
         setWallet(response.publicKey.toString());
         setIsConnected(true);
-        // await createAccount(response.publicKey.toString());
+        findUserInitialized(response.publicKey.toString());
       }
     }
   };
@@ -91,6 +86,7 @@ function App() {
       await checkSolanaWalletExists();
     };
     checkSolanaWalletExists();
+    
     window.addEventListener("load", onLoad);
     return () => window.removeEventListener("load", onLoad);
   }, []);
@@ -102,29 +98,34 @@ function App() {
     return provider;
   };
 
-  async function getFlipProgram(rpcEndpoint: string) {
-    const programId = new anchor.web3.PublicKey(PROGRAM_ID_CLI);
-    const provider = new anchor.AnchorProvider(
-      new anchor.web3.Connection(rpcEndpoint, {
-        commitment: DEFAULT_COMMITMENT,
-      }),
-      new AnchorWallet(anchor.web3.Keypair.generate()),
-      { commitment: DEFAULT_COMMITMENT }
+  const getProgram = () => {
+    const provider = getProvider();
+    const programID = new PublicKey(idl.metadata.address);
+    console.log(programID.toBase58());
+    const program = new anchor.Program(
+      JSON.parse(JSON.stringify(idl)),
+      programID,
+      provider
     );
+    return program;
+  };
 
-    const idl = await anchor.Program.fetchIdl(programId, provider);
-    if (!idl)
-      throw new Error(
-        `Failed to find IDL for program [ ${programId.toBase58()} ]`
-      );
-
-    return new anchor.Program(
-      idl,
-      programId,
-      provider,
-      new anchor.BorshCoder(idl)
+  const findUserInitialized = async (wallet: string) => {
+    const pubKey = new PublicKey(wallet);
+    const program = getProgram();
+    const [userVRF, setUserVRF] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("VRF"), pubKey.toBuffer()],
+      program.programId
     );
-  }
+    try {
+      const state: any = await program.account.vrfKey.fetch(userVRF);
+      setUserInitialized(true);
+      setVrfSecretKey(state.key);
+    } catch (error) {
+      console.log("User is not initialized");
+      setUserInitialized(false);
+    }
+  };
 
   async function getCallback(
     program: anchor.Program,
@@ -155,22 +156,18 @@ function App() {
   const createAccount = async (pubkey: string) => {
     console.log("in here");
     console.log(pubkey);
+    if (userInitialized) {
+      console.log("User has already initialized");
+      return;
+    }
     const payerPubkey = new PublicKey(pubkey);
     const provider = getProvider();
     const switchboardProgram = await loadSwitchboardProgram(
       "devnet",
       provider.connection
     );
-    // const house = await House.load(program);
-    // const program = await getFlipProgram(clusterApiUrl("devnet"));
-    const programID = new PublicKey(idl.metadata.address);
-    const program = new anchor.Program(
-      JSON.parse(JSON.stringify(idl)),
-      programID,
-      provider
-    );
-
-    // const program = await anchor.
+    const program = getProgram();
+    console.log(program.programId.toBase58());
 
     const switchboardQueue = getQueueAccount(switchboardProgram);
     const switchboardMint = await switchboardQueue.loadMint();
@@ -218,6 +215,11 @@ function App() {
     const gameId = (Math.random() * 1000).toString();
     setGameSecretId(gameId);
 
+    const [userVRF, setUserVRF] = anchor.web3.PublicKey.findProgramAddressSync(
+      [Buffer.from("VRF"), payerPubkey.toBuffer()],
+      program.programId
+    );
+
     const [gamePDA, gameBump] = await anchor.web3.PublicKey.findProgramAddress(
       [Buffer.from("GAME"), Buffer.from(gameId), payerPubkey.toBuffer()],
       program.programId
@@ -228,9 +230,6 @@ function App() {
         program.programId
       );
 
-    // const vrfProgram = new VrfAccount({program: switchboardProgram, publicKey: vrfSecret.publicKey, keypair: vrfSecret})
-    // const vrf = await vrfProgram.loadData();
-    console.log(gamePDA.toBase58());
     const txnIxns: TransactionInstruction[] = [
       // create VRF account
       spl.createAssociatedTokenAccountInstruction(
@@ -281,6 +280,15 @@ function App() {
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .instruction(),
+      // await program.methods
+      //   .initVrf({})
+      //   .accounts({
+      //     state: userVRF,
+      //     vrf: vrfSecret.publicKey,
+      //     payer: payerPubkey,
+      //     systemProgram: anchor.web3.SystemProgram.programId,
+      //   })
+      //   .instruction(),
       await program.methods
         .initClient({
           maxResult: new anchor.BN(1337),
@@ -307,26 +315,9 @@ function App() {
     tx.sign(vrfSecret);
 
     const { signature } = await phantomProvider.signAndSendTransaction(tx);
-    console.log(signature);
     const status = await connection.getSignatureStatus(signature);
-    console.log("finding gameState");
-    console.log(gamePDA.toBase58());
-    // const gameState = await program.account.gameState.fetch(gamePDA);
-    // console.log(gameState);
     console.log(status);
     console.log("over");
-    // const state = await VrfClientState.fetch(
-    //   connection,
-    //   vrfClientKey
-    // );
-    // let data;
-    // if(state!=null) {
-    //   data = state;
-    // }
-    // const vrfAccount = new VrfAccount({
-    //   program: switchboardProgram,
-    //   publicKey: state.vrf,
-    // });
   };
 
   const findPDA = async () => {
@@ -344,7 +335,9 @@ function App() {
         program.programId
       );
     console.log(vrfClientKey);
-    const gameState: any = await program.account.vrfClientState.fetch(vrfClientKey);
+    const gameState: any = await program.account.vrfClientState.fetch(
+      vrfClientKey
+    );
     console.log(gameState.result.toString());
   };
 
@@ -356,14 +349,7 @@ function App() {
       "devnet",
       provider.connection
     );
-    // const house = await House.load(program);
-    // const program = await getFlipProgram(clusterApiUrl("devnet"));
-    const programID = new PublicKey(idl.metadata.address);
-    const program = new anchor.Program(
-      JSON.parse(JSON.stringify(idl)),
-      programID,
-      provider
-    );
+    const program = getProgram();
     const gameId = gameSecretId;
     const vrfSecret = vrfSecretKey;
     const [gamePDA, gameBump] = await anchor.web3.PublicKey.findProgramAddress(
@@ -462,11 +448,12 @@ function App() {
               vrfClientKey,
               async (accountInfo) => {
                 console.log(accountInfo);
-                const vrfClientState: any = await program.account.vrfClientState.fetch(
-                  vrfClientKey
+                const vrfClientState: any =
+                  await program.account.vrfClientState.fetch(vrfClientKey);
+                console.log(
+                  `VrfClient Result: ${vrfClientState.result.toString(10)}`
                 );
-                console.log(`VrfClient Result: ${vrfClientState.result.toString(10)}`); 
-                if(vrfClientState.result.toString(10) === "0"){
+                if (vrfClientState.result.toString(10) === "0") {
                   return;
                 }
                 setLoading(false);
@@ -480,7 +467,6 @@ function App() {
     } catch (error) {
       console.log(error);
       setLoading(false);
-
     }
     console.log(gamePDA.toBase58());
     console.log(vrfClientKey.toBase58());
@@ -503,11 +489,23 @@ function App() {
           ) : (
             <p>Wallet is not connected</p>
           )}
+          {userInitialized ? (
+            <p>The user has initialized</p>
+          ) : (
+            <p>
+              The user has not initialized, please initialize before requesting
+              for randomness
+            </p>
+          )}
           <Button primary onClick={() => createAccount(wallet)}>
             Initialize User
           </Button>
           <Button onClick={findPDA}>FindPDA</Button>
-          {loading ? <Button loading >requesting Randomness</Button> : <Button onClick={requestRandomness}>Request Randomness</Button>}
+          {loading ? (
+            <Button loading>requesting Randomness</Button>
+          ) : (
+            <Button onClick={requestRandomness}>Request Randomness</Button>
+          )}
           {randomValue !== "" && <p>The VRF value is: {randomValue}</p>}
         </Segment>
       </div>
