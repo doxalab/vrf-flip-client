@@ -101,7 +101,7 @@ function App() {
   const getProgram = () => {
     const provider = getProvider();
     const programID = new PublicKey(idl.metadata.address);
-    console.log(programID.toBase58());
+    // console.log(programID.toBase58());
     const program = new anchor.Program(
       JSON.parse(JSON.stringify(idl)),
       programID,
@@ -167,7 +167,7 @@ function App() {
       provider.connection
     );
     const program = getProgram();
-    console.log(program.programId.toBase58());
+    console.log(`This is programID: ${program.programId.toBase58()}`);
 
     const switchboardQueue = getQueueAccount(switchboardProgram);
     const switchboardMint = await switchboardQueue.loadMint();
@@ -280,34 +280,34 @@ function App() {
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .instruction(),
-      // await program.methods
-      //   .initVrf({})
-      //   .accounts({
-      //     state: userVRF,
-      //     vrf: vrfSecret.publicKey,
-      //     payer: payerPubkey,
-      //     systemProgram: anchor.web3.SystemProgram.programId,
-      //   })
-      //   .instruction(),
       await program.methods
-        .initClient({
-          maxResult: new anchor.BN(1337),
-          gameId: gameId,
-          choice: new anchor.BN(0),
-          betAmount: new anchor.BN(1),
-        })
+        .initVrf({})
         .accounts({
-          game: gamePDA,
-          escrowTokenAccount: escrowPDA,
-          tokenMint: USDCMint,
-          userTokenAccount: payerTokenAccount,
-          state: vrfClientKey,
+          state: userVRF,
           vrf: vrfSecret.publicKey,
           payer: payerPubkey,
           systemProgram: anchor.web3.SystemProgram.programId,
-          tokenProgram: spl.TOKEN_PROGRAM_ID,
         })
         .instruction(),
+      // await program.methods
+      //   .initClient({
+      //     maxResult: new anchor.BN(1337),
+      //     gameId: gameId,
+      //     choice: new anchor.BN(0),
+      //     betAmount: new anchor.BN(1),
+      //   })
+      //   .accounts({
+      //     game: gamePDA,
+      //     escrowTokenAccount: escrowPDA,
+      //     tokenMint: USDCMint,
+      //     userTokenAccount: payerTokenAccount,
+      //     state: vrfClientKey,
+      //     vrf: vrfSecret.publicKey,
+      //     payer: payerPubkey,
+      //     systemProgram: anchor.web3.SystemProgram.programId,
+      //     tokenProgram: spl.TOKEN_PROGRAM_ID,
+      //   })
+      //   .instruction(),
     ];
     const tx = new anchor.web3.Transaction().add(...txnIxns);
     tx.feePayer = payerPubkey;

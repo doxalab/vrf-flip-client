@@ -1,6 +1,6 @@
 {
   "version": "0.1.0",
-  "name": "vrf_client",
+  "name": "vrf",
   "instructions": [
     {
       "name": "initClient",
@@ -533,6 +533,6 @@
     }
   ],
   "metadata": {
-    "address": "5gs7CTbe8xGde2Fs6R5U7LvCgZQoHTyaKHYF4Rs2oouW"
+    "address": "21yN3N5jquXxbPDSRZiqANhZsDQUAgQvz5vNysHXL3ut"
   }
 }
