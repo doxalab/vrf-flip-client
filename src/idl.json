@@ -69,6 +69,11 @@
           "isSigner": false
         },
         {
+          "name": "vrfState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
           "name": "vrf",
           "isMut": false,
           "isSigner": false

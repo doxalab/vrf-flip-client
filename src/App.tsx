@@ -21,6 +21,8 @@ import {
   VrfAccount,
 } from "@switchboard-xyz/switchboard-v2";
 import idl from "./idl.json";
+import { collection, getDocs, addDoc } from "@firebase/firestore";
+import { db } from "./firebase-config";
 
 const connection = new Connection(clusterApiUrl("devnet"));
 var Buffer = require("buffer/").Buffer;
@@ -31,10 +33,13 @@ function App() {
   const [wallet, setWallet] = useState<string>("");
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [gameSecretId, setGameSecretId] = useState("");
-  const [vrfSecretKey, setVrfSecretKey] = useState<Keypair>();
+  const [vrfSecretKey, setVrfSecretKey] = useState<PublicKey>();
   const [loading, setLoading] = useState<boolean>(false);
   const [randomValue, setRandomValue] = useState<string>("");
   const [userInitialized, setUserInitialized] = useState<boolean>(false);
+
+  // Firestore collection ref
+  const gameCollectionRef = collection(db, "games");
 
   const getPhantomProvider = () => {
     if ("phantom" in window) {
@@ -81,12 +86,21 @@ function App() {
     }
   };
 
+  const fetchGames = async () => {
+    const data = await getDocs(gameCollectionRef);
+    console.log(
+      data.docs.map((doc) => ({
+        ...doc.data(),
+      }))
+    );
+  };
+
   useEffect(() => {
     const onLoad = async () => {
       await checkSolanaWalletExists();
     };
     checkSolanaWalletExists();
-    
+    fetchGames();
     window.addEventListener("load", onLoad);
     return () => window.removeEventListener("load", onLoad);
   }, []);
@@ -114,14 +128,16 @@ function App() {
     const pubKey = new PublicKey(wallet);
     const program = getProgram();
     const [userVRF, setUserVRF] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("VRF"), pubKey.toBuffer()],
+      [Buffer.from("VRFGAME"), pubKey.toBuffer()],
       program.programId
     );
     try {
       const state: any = await program.account.vrfKey.fetch(userVRF);
       setUserInitialized(true);
+      console.log(state.key.toBase58());
       setVrfSecretKey(state.key);
     } catch (error) {
+      console.log(error);
       console.log("User is not initialized");
       setUserInitialized(false);
     }
@@ -156,10 +172,10 @@ function App() {
   const createAccount = async (pubkey: string) => {
     console.log("in here");
     console.log(pubkey);
-    if (userInitialized) {
-      console.log("User has already initialized");
-      return;
-    }
+    // if (userInitialized) {
+    //   console.log("User has already initialized");
+    //   return;
+    // }
     const payerPubkey = new PublicKey(pubkey);
     const provider = getProvider();
     const switchboardProgram = await loadSwitchboardProgram(
@@ -173,7 +189,7 @@ function App() {
     const switchboardMint = await switchboardQueue.loadMint();
 
     const vrfSecret = anchor.web3.Keypair.generate();
-    setVrfSecretKey(vrfSecret);
+    setVrfSecretKey(vrfSecret.publicKey);
 
     const [programStateAccount, stateBump] = ProgramStateAccount.fromSeed(
       switchboardProgram as any
@@ -205,30 +221,10 @@ function App() {
       true
     );
 
-    const USDCMint = new PublicKey(
-      "DmLQYBFTMLt2DTCPA9NnC81zZwZCrYwWBNmkbYnUgo9Y"
-    );
-    const payerTokenAccount = await spl.getAssociatedTokenAddress(
-      USDCMint,
-      payerPubkey
-    );
-    const gameId = (Math.random() * 1000).toString();
-    setGameSecretId(gameId);
-
     const [userVRF, setUserVRF] = anchor.web3.PublicKey.findProgramAddressSync(
-      [Buffer.from("VRF"), payerPubkey.toBuffer()],
+      [Buffer.from("VRFGAME"), payerPubkey.toBuffer()],
       program.programId
     );
-
-    const [gamePDA, gameBump] = await anchor.web3.PublicKey.findProgramAddress(
-      [Buffer.from("GAME"), Buffer.from(gameId), payerPubkey.toBuffer()],
-      program.programId
-    );
-    const [escrowPDA, escrowBump] =
-      await anchor.web3.PublicKey.findProgramAddress(
-        [Buffer.from("ESCROW"), Buffer.from(gameId), payerPubkey.toBuffer()],
-        program.programId
-      );
 
     const txnIxns: TransactionInstruction[] = [
       // create VRF account
@@ -286,28 +282,10 @@ function App() {
           state: userVRF,
           vrf: vrfSecret.publicKey,
           payer: payerPubkey,
+          vrfState: vrfClientKey,
           systemProgram: anchor.web3.SystemProgram.programId,
         })
         .instruction(),
-      // await program.methods
-      //   .initClient({
-      //     maxResult: new anchor.BN(1337),
-      //     gameId: gameId,
-      //     choice: new anchor.BN(0),
-      //     betAmount: new anchor.BN(1),
-      //   })
-      //   .accounts({
-      //     game: gamePDA,
-      //     escrowTokenAccount: escrowPDA,
-      //     tokenMint: USDCMint,
-      //     userTokenAccount: payerTokenAccount,
-      //     state: vrfClientKey,
-      //     vrf: vrfSecret.publicKey,
-      //     payer: payerPubkey,
-      //     systemProgram: anchor.web3.SystemProgram.programId,
-      //     tokenProgram: spl.TOKEN_PROGRAM_ID,
-      //   })
-      //   .instruction(),
     ];
     const tx = new anchor.web3.Transaction().add(...txnIxns);
     tx.feePayer = payerPubkey;
@@ -331,7 +309,7 @@ function App() {
     const PDA = new PublicKey("98VHjjMorYDeVXxUdUDXLyb6dDcZKjpxTPFAxW8xpfXb");
     const [vrfClientKey, vrfClientBump] =
       anchor.utils.publicKey.findProgramAddressSync(
-        [Buffer.from("CLIENTSEED"), vrfSecretKey!.publicKey.toBytes()],
+        [Buffer.from("CLIENTSEED"), vrfSecretKey!.toBytes()],
         program.programId
       );
     console.log(vrfClientKey);
@@ -339,6 +317,70 @@ function App() {
       vrfClientKey
     );
     console.log(gameState.result.toString());
+  };
+
+  const createGame = async () => {
+    const program = getProgram();
+    const gameId = (Math.random() * 1000).toString();
+    setGameSecretId(gameId);
+    const payerPubkey = new PublicKey(wallet);
+    const [gamePDA, gameBump] = await anchor.web3.PublicKey.findProgramAddress(
+      [Buffer.from("GAME"), Buffer.from(gameId), payerPubkey.toBuffer()],
+      program.programId
+    );
+    const [escrowPDA, escrowBump] =
+      await anchor.web3.PublicKey.findProgramAddress(
+        [Buffer.from("ESCROW"), Buffer.from(gameId), payerPubkey.toBuffer()],
+        program.programId
+      );
+    const [vrfClientKey, vrfClientBump] =
+      anchor.utils.publicKey.findProgramAddressSync(
+        [Buffer.from("CLIENTSEED"), vrfSecretKey!.toBytes()],
+        program.programId
+      );
+    console.log(vrfClientKey.toBase58());
+    const USDCMint = new PublicKey(
+      "DmLQYBFTMLt2DTCPA9NnC81zZwZCrYwWBNmkbYnUgo9Y"
+    );
+    const payerTokenAccount = await spl.getAssociatedTokenAddress(
+      USDCMint,
+      payerPubkey
+    );
+    console.log(gameId);
+    try {
+      const tx = await program.methods
+        .initClient({
+          maxResult: new anchor.BN(1337),
+          gameId: gameId,
+          choice: new anchor.BN(0),
+          betAmount: new anchor.BN(1),
+        })
+        .accounts({
+          game: gamePDA,
+          escrowTokenAccount: escrowPDA,
+          tokenMint: USDCMint,
+          userTokenAccount: payerTokenAccount,
+          state: vrfClientKey,
+          vrf: vrfSecretKey,
+          payer: payerPubkey,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: spl.TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+      console.log(tx);
+      const status = await connection.getSignatureStatus(tx);
+      console.log(status);
+      if (status) {
+        await addDoc(gameCollectionRef, {
+          game_id: gameId,
+          owner: wallet,
+          game_pda: gamePDA.toBase58(),
+        });
+        console.log("Document updated");
+      }
+    } catch (error) {
+      console.log(error);
+    }
   };
 
   const requestRandomness = async () => {
@@ -351,6 +393,7 @@ function App() {
     );
     const program = getProgram();
     const gameId = gameSecretId;
+    console.log(vrfSecretKey?.toBase58());
     const vrfSecret = vrfSecretKey;
     const [gamePDA, gameBump] = await anchor.web3.PublicKey.findProgramAddress(
       [Buffer.from("GAME"), Buffer.from(gameId), payerPubkey.toBuffer()],
@@ -372,20 +415,21 @@ function App() {
     const queue = await switchboardQueue.loadData();
     const [vrfClientKey, vrfClientBump] =
       anchor.utils.publicKey.findProgramAddressSync(
-        [Buffer.from("CLIENTSEED"), vrfSecret?.publicKey.toBytes()],
+        [Buffer.from("CLIENTSEED"), vrfSecret!.toBytes()],
         program.programId
       );
+    console.log(vrfClientKey.toBase58());
 
     const [permissionAccount, permissionBump] = PermissionAccount.fromSeed(
       switchboardProgram as any,
       queue.authority,
       switchboardQueue.publicKey,
-      vrfSecret!.publicKey
+      vrfSecret!
     );
 
     const vrfEscrow = await spl.getAssociatedTokenAddress(
       switchboardMint.address,
-      vrfSecret!.publicKey,
+      vrfSecret!,
       true
     );
 
@@ -416,7 +460,7 @@ function App() {
         })
         .accounts({
           state: vrfClientKey,
-          vrf: vrfSecret!.publicKey,
+          vrf: vrfSecret!,
           oracleQueue: switchboardQueue.publicKey,
           queueAuthority: queue.authority,
           dataBuffer: queue.dataBuffer,
@@ -439,6 +483,7 @@ function App() {
       console.log(request_signature);
 
       const status = await connection.getSignatureStatus(request_signature);
+      const timeout = 30;
       if (status) {
         console.log(status);
         let accountWs: number;
@@ -459,10 +504,20 @@ function App() {
                 setLoading(false);
                 setRandomValue(vrfClientState.result.toString(10));
                 resolve(vrfClientState);
+                return;
               }
             );
           }
         );
+        const result = await promiseWithTimeout(
+          awaitUpdatePromise,
+          timeout * 1000,
+          new Error(`flip user failed to update in ${timeout} seconds`)
+        ).finally(() => {
+          if (accountWs) {
+            program.provider.connection.removeAccountChangeListener(accountWs);
+          }
+        });
       }
     } catch (error) {
       console.log(error);
@@ -471,6 +526,22 @@ function App() {
     console.log(gamePDA.toBase58());
     console.log(vrfClientKey.toBase58());
   };
+
+  function promiseWithTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    timeoutError = new Error("Promise timed out")
+  ): Promise<T> {
+    // create a promise that rejects in milliseconds
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(timeoutError);
+      }, ms);
+    });
+
+    // returns a race between timeout and the passed promise
+    return Promise.race<T>([promise, timeout]);
+  }
 
   return (
     <div>
@@ -500,7 +571,7 @@ function App() {
           <Button primary onClick={() => createAccount(wallet)}>
             Initialize User
           </Button>
-          <Button onClick={findPDA}>FindPDA</Button>
+          <Button onClick={createGame}>createGame</Button>
           {loading ? (
             <Button loading>requesting Randomness</Button>
           ) : (
