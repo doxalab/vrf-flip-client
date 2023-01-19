@@ -7,7 +7,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import React, { useState, useRef, useEffect, FormEvent } from "react";
-import { Button, Header, Segment } from "semantic-ui-react";
+import { Button, Card, Header, Segment } from "semantic-ui-react";
 import Startbar from "./Startbar";
 import * as spl from "@solana/spl-token-v3";
 import * as anchor from "@project-serum/anchor";
@@ -23,6 +23,7 @@ import {
 import idl from "./idl.json";
 import { collection, getDocs, addDoc } from "@firebase/firestore";
 import { db } from "./firebase-config";
+import { GameStateFields } from "./generated/accounts/GameState";
 
 const connection = new Connection(clusterApiUrl("devnet"));
 var Buffer = require("buffer/").Buffer;
@@ -37,6 +38,8 @@ function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [randomValue, setRandomValue] = useState<string>("");
   const [userInitialized, setUserInitialized] = useState<boolean>(false);
+  const [games, setGames] = useState<Array<any>>([]);
+  const [gameIds, setGameIds] = useState<Array<string>>([]);
 
   // Firestore collection ref
   const gameCollectionRef = collection(db, "games");
@@ -88,11 +91,19 @@ function App() {
 
   const fetchGames = async () => {
     const data = await getDocs(gameCollectionRef);
-    console.log(
-      data.docs.map((doc) => ({
-        ...doc.data(),
-      }))
+    const program = getProgram();
+    let gamePDAs: Array<PublicKey> = [];
+    let gameIds: Array<string> = [];
+    data.docs.forEach((doc) => {
+      gamePDAs.push(new PublicKey(doc.get("game_pda")));
+      gameIds.push(doc.get("game_id"));
+    });
+    const gameDetails: any = await program.account.gameState.fetchMultiple(
+      gamePDAs
     );
+    setGames(gameDetails);
+    setGameIds(gameIds);
+    console.log(gameDetails);
   };
 
   useEffect(() => {
@@ -383,7 +394,7 @@ function App() {
     }
   };
 
-  const requestRandomness = async () => {
+  const requestRandomness = async (gameId: any) => {
     setLoading(true);
     const payerPubkey = new PublicKey(wallet);
     const provider = getProvider();
@@ -392,7 +403,6 @@ function App() {
       provider.connection
     );
     const program = getProgram();
-    const gameId = gameSecretId;
     console.log(vrfSecretKey?.toBase58());
     const vrfSecret = vrfSecretKey;
     const [gamePDA, gameBump] = await anchor.web3.PublicKey.findProgramAddress(
@@ -577,6 +587,52 @@ function App() {
           ) : (
             <Button onClick={requestRandomness}>Request Randomness</Button>
           )}
+          <br />
+          <br />
+          <Card.Group>
+            {games != null && games?.map((game, index) => {
+              return (
+                <Card>
+                  <Card.Content>
+                    <Card.Header>Game: {gameIds[index]}</Card.Header>
+                    <Card.Meta>Bet Amount: {Number(game.betAmount)}</Card.Meta>
+                    <Card.Meta>
+                      Room Owner Choice: {game.ownerChoice ? "Heads" : "Tails"}
+                    </Card.Meta>
+                    {game.result != null && (
+                      <Card.Description>
+                        Result:{" "}
+                        {Number(game.result) === 0 ? (
+                          <strong>Tails</strong>
+                        ) : (
+                          <strong>Heads</strong>
+                        )}
+                      </Card.Description>
+                    )}
+                  </Card.Content>
+                  <Card.Content extra>
+                    <div className="ui two buttons">
+                      {game.winner != null ? (
+                        <Button basic color="red">
+                          Claim
+                        </Button>
+                      ) : (
+                        <Button
+                          basic
+                          color="green"
+                          onClick={() =>
+                            requestRandomness(gameIds[index])
+                          }
+                        >
+                          Play
+                        </Button>
+                      )}
+                    </div>
+                  </Card.Content>
+                </Card>
+              );
+            })}
+          </Card.Group>
           {randomValue !== "" && <p>The VRF value is: {randomValue}</p>}
         </Segment>
       </div>
